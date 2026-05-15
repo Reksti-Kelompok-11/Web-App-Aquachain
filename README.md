@@ -45,6 +45,6 @@ Pastikan Anda sudah menginstal **Node.js** (versi 18.x atau terbaru) dan **npm**
    npm run dev
    ```
 5. **Buka Aplikasi:**
-   Buka browser Anda dan akses tautan berikut: http://localhost:3000
+   Buka browser Anda dan akses tautan berikut: http://localhost:3001
    
    
