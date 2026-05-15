@@ -104,7 +104,9 @@ export function AlertStatusBadge({ status }: { status: "resolved" | "auto" | "pe
   const config = configs[status]
 
   return (
-    <span className={`${config.bg} ${config.text} text-xs font-medium px-2 py-1 rounded-full`}>
+    <span 
+      className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap ${config.bg} ${config.text}`}
+    >
       {config.label}
     </span>
   )

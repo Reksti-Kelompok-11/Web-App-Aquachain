@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { Sidebar } from "@/components/sidebar"
 import { PageHeader } from "@/components/page-header"
 import { 
@@ -18,65 +18,104 @@ import {
   Clock
 } from "lucide-react"
 
-// Dummy data - easy to replace with API fetch later
-const summaryData = {
-  sisaPakan: {
-    value: 46,
-    unit: "Kg",
-    description: "Cukup untuk 2 hari ke depan",
-    trend: "stable",
-    percentage: 65 // percentage of tank capacity
-  },
-  pakanTerdistribusi: {
-    value: 18.7,
-    unit: "Kg",
-    target: 22.5,
-    description: "Dari target harian 22.5 Kg",
-    trend: "up",
-    percentage: 83 // percentage of target achieved
-  },
-  pakanDibatalkan: {
-    value: 3.8,
-    unit: "Kg",
-    count: 1,
-    description: "1 jadwal dibatalkan karena pH tinggi",
-    trend: "warning"
-  }
-}
-
-const riwayatPakan = [
-  { id: 1, tanggal: "12 Apr 2026", waktu: "18:00", target: 3.8, aktual: 0, status: "dibatalkan", alasan: "pH tinggi (8.7)" },
-  { id: 2, tanggal: "12 Apr 2026", waktu: "12:00", target: 10.7, aktual: 10.7, status: "terkirim", alasan: null },
-  { id: 3, tanggal: "12 Apr 2026", waktu: "06:00", target: 8, aktual: 8, status: "terkirim", alasan: null },
-  { id: 4, tanggal: "11 Apr 2026", waktu: "18:00", target: 7.5, aktual: 7.5, status: "terkirim", alasan: null },
-  { id: 5, tanggal: "11 Apr 2026", waktu: "12:00", target: 6, aktual: 6, status: "terkirim", alasan: null },
-  { id: 6, tanggal: "11 Apr 2026", waktu: "06:00", target: 5.5, aktual: 5.5, status: "terkirim", alasan: null },
-  { id: 7, tanggal: "10 Apr 2026", waktu: "18:00", target: 7, aktual: 7, status: "terkirim", alasan: null },
-  { id: 8, tanggal: "10 Apr 2026", waktu: "12:00", target: 6.5, aktual: 6.5, status: "terkirim", alasan: null },
-  { id: 9, tanggal: "10 Apr 2026", waktu: "06:00", target: 5, aktual: 5, status: "terkirim", alasan: null },
-  { id: 10, tanggal: "09 Apr 2026", waktu: "18:00", target: 8, aktual: 0, status: "dibatalkan", alasan: "Suhu tinggi (33°C)" },
-  { id: 11, tanggal: "09 Apr 2026", waktu: "12:00", target: 7, aktual: 7, status: "terkirim", alasan: null },
-  { id: 12, tanggal: "09 Apr 2026", waktu: "06:00", target: 6, aktual: 6, status: "terkirim", alasan: null },
-  { id: 13, tanggal: "08 Apr 2026", waktu: "18:00", target: 7.5, aktual: 7.5, status: "terkirim", alasan: null },
-  { id: 14, tanggal: "08 Apr 2026", waktu: "12:00", target: 6.5, aktual: 6.5, status: "terkirim", alasan: null },
-  { id: 15, tanggal: "08 Apr 2026", waktu: "06:00", target: 5.5, aktual: 5.5, status: "terkirim", alasan: null },
-]
-
-// Get unique dates for filter
-const uniqueDates = [...new Set(riwayatPakan.map(item => item.tanggal))]
-
 type FilterType = "semua" | "terkirim" | "dibatalkan"
 const ITEMS_PER_PAGE = 5
 
+type LogItemUI = {
+  id: string;
+  tanggal: string;
+  waktu: string;
+  target: number;
+  aktual: number;
+  status: string;
+  alasan: string | null;
+}
+
 export default function LogPakanPage() {
+  const [logsData, setLogsData] = useState<LogItemUI[]>([])
+  const [isLoading, setIsLoading] = useState(true)
   const [statusFilter, setStatusFilter] = useState<FilterType>("semua")
   const [dateFilter, setDateFilter] = useState<string>("semua")
   const [showStatusDropdown, setShowStatusDropdown] = useState(false)
   const [showDateDropdown, setShowDateDropdown] = useState(false)
   const [currentPage, setCurrentPage] = useState(1)
 
+  const summaryData = useMemo(() => {
+    const todayStr = logsData.length > 0 ? logsData[0].tanggal : "";
+    const todayLogs = logsData.filter((log: LogItemUI) => log.tanggal === todayStr);
+
+    const terdistribusi = todayLogs
+      .filter((log: LogItemUI) => log.status === "terkirim")
+      .reduce((sum: number, log: LogItemUI) => sum + log.aktual, 0);
+
+    const dibatalkan = todayLogs
+      .filter((log: LogItemUI) => log.status === "dibatalkan");
+    
+    const totalDibatalkanKg = dibatalkan.reduce((sum: number, log: LogItemUI) => sum + log.target, 0);
+
+    return {
+      sisaPakan: {
+        value: 46, // Dummy
+        unit: "Kg",
+        description: "Cukup untuk 2 hari ke depan",
+        percentage: 65
+      },
+      pakanTerdistribusi: {
+        value: parseFloat(terdistribusi.toFixed(1)),
+        unit: "Kg",
+        target: 22.5,
+        description: `Target harian 22.5 Kg`,
+        percentage: Math.min(Math.round((terdistribusi / 22.5) * 100), 100)
+      },
+      pakanDibatalkan: {
+        value: parseFloat(totalDibatalkanKg.toFixed(1)),
+        unit: "Kg",
+        count: dibatalkan.length,
+        description: `${dibatalkan.length} jadwal dibatalkan otomatis`,
+      }
+    };
+  }, [logsData]);
+
+  // Fetching data from backend
+  useEffect(() => {
+    const fetchLogs = async () => {
+      try {
+        const res = await fetch("https://backend-aqua-chain.vercel.app/api/feeder/pond-001/logs")
+        if (!res.ok) throw new Error("Gagal mengambil data")
+        
+        const data = await res.json()
+        
+        // Mapping data BE ke format UI
+        const formattedData: LogItemUI[] = data.map((item: any) => {
+          const dateObj = new Date(item.actual_time || item.scheduled_time)
+          
+          return {
+            id: item.log_id,
+            tanggal: dateObj.toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" }),
+            waktu: dateObj.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }),
+            target: item.target_dosage,
+            aktual: item.actual_dosage || 0,
+            status: (item.status?.toLowerCase() === "completed" || item.status?.toLowerCase() === "success" || item.status?.toLowerCase() === "terkirim") ? "terkirim" : "dibatalkan",
+            alasan: item.trigger_reason
+          }
+        })
+
+        setLogsData(formattedData)
+      } catch (error) {
+        console.error("Error fetching logs:", error)
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    fetchLogs()
+  }, [])
+
+  // Bikin uniqueDates dinamis dari data API
+  const uniqueDates = [...new Set(logsData.map(item => item.tanggal))]
+
   // Filter logic
-  const filteredRiwayat = riwayatPakan.filter(item => {
+  const filteredRiwayat = logsData.filter(item => {
     const statusMatch = statusFilter === "semua" || item.status === statusFilter
     const dateMatch = dateFilter === "semua" || item.tanggal === dateFilter
     return statusMatch && dateMatch
@@ -103,7 +142,7 @@ export default function LogPakanPage() {
   const getStatusBadge = (status: string, alasan: string | null) => {
     if (status === "terkirim") {
       return (
-        <div className="flex items-center gap-2">
+        <div className="flex justify-end items-center gap-2">
           <span className="text-green-700 font-medium">Terkirim</span>
           <div className="w-6 h-6 rounded-full bg-green-500 flex items-center justify-center shadow-sm">
             <CheckCircle2 className="text-white" size={14} />
@@ -339,7 +378,13 @@ export default function LogPakanPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {paginatedRiwayat.length > 0 ? (
+                  {isLoading ? (
+                    <tr>
+                      <td colSpan={4} className="py-8 text-center text-slate-500">
+                        Memuat data riwayat pakan...
+                      </td>
+                    </tr>
+                  ) : paginatedRiwayat.length > 0 ? (
                     paginatedRiwayat.map((item) => (
                       <tr 
                         key={item.id} 
@@ -420,16 +465,16 @@ export default function LogPakanPage() {
             <div className="p-4 border-t border-slate-100 bg-white">
               <div className="flex flex-wrap justify-between items-center gap-4 text-sm">
                 <span className="text-slate-600">
-                  Total: <strong>{riwayatPakan.length}</strong> eksekusi
+                  Total: <strong>{logsData.length}</strong> eksekusi
                 </span>
                 <div className="flex gap-4">
                   <span className="flex items-center gap-1.5 text-green-600">
                     <CheckCircle2 size={14} />
-                    {riwayatPakan.filter(r => r.status === "terkirim").length} Terkirim
+                    {logsData.filter(r => r.status === "terkirim").length} Terkirim
                   </span>
                   <span className="flex items-center gap-1.5 text-red-600">
                     <XCircle size={14} />
-                    {riwayatPakan.filter(r => r.status === "dibatalkan").length} Dibatalkan
+                    {logsData.filter(r => r.status === "dibatalkan").length} Dibatalkan
                   </span>
                 </div>
               </div>

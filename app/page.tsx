@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useMemo, useState, useEffect } from "react"
 import Link from "next/link"
 import {
   Activity,
@@ -81,25 +81,21 @@ const getMetricStatus = (
   telemetry: { ph: number; suhu: number; kekeruhan: number },
 ): MetricStatus => {
   if (metric === "ph") {
-    if (telemetry.ph < 6.5 || telemetry.ph > 8.2) return "bahaya"
-    if (telemetry.ph < 6.8 || telemetry.ph > 7.8) return "waspada"
+    if (telemetry.ph < 6.5 || telemetry.ph > 8.5) return "bahaya"
+    if (telemetry.ph < 7 || telemetry.ph > 8) return "waspada"
     return "aman"
   }
   if (metric === "suhu") {
-    if (telemetry.suhu < 24 || telemetry.suhu > 31) return "bahaya"
-    if (telemetry.suhu < 25 || telemetry.suhu > 29) return "waspada"
+    if (telemetry.suhu < 20 || telemetry.suhu > 33) return "bahaya"
+    if (telemetry.suhu < 25 || telemetry.suhu > 30) return "waspada"
     return "aman"
   }
   if (metric === "kekeruhan") {
-    if (telemetry.kekeruhan > 20) return "bahaya"
+    if (telemetry.kekeruhan > 100) return "bahaya"
     if (telemetry.kekeruhan > 10) return "waspada"
     return "aman"
   }
-  return getMetricStatus("ph", telemetry) === "bahaya" ||
-    getMetricStatus("suhu", telemetry) === "bahaya" ||
-    getMetricStatus("kekeruhan", telemetry) === "bahaya"
-    ? "bahaya"
-    : "aman"
+  return "aman"
 }
 
 const getShortHash = (hash: string) => {
@@ -108,48 +104,154 @@ const getShortHash = (hash: string) => {
 }
 
 export default function Dashboard() {
-  // Dummy data (mudah diganti dari backend)
-  const [dummyPonds] = useState<Pond[]>([
-    { id: "A1", name: "Kolam A1", fish_type: "Lele", capacity: 3000, status: "aman" },
-    { id: "A2", name: "Kolam A2", fish_type: "Lele", capacity: 2800, status: "waspada" },
-    { id: "B1", name: "Kolam B1", fish_type: "Nila", capacity: 3200, status: "bahaya" },
-  ])
-  const [dummyTelemetry] = useState<TelemetryByPond>({
-    A1: { ph: 7.2, suhu: 27, kekeruhan: 5 },
-    A2: { ph: 7.8, suhu: 29, kekeruhan: 12 },
-    B1: { ph: 8.5, suhu: 32, kekeruhan: 25 },
-  })
-  const [dummyLogs] = useState<LogItem[]>([
-    { waktu: "08:00:12", aktivitas: "Pakan otomatis 50g", hash_code: "0x9e4a6f271ad19b8f8a1c7462f1259a0f", status: "success" },
-    { waktu: "12:00:45", aktivitas: "Pakan batal (pH 8.5)", hash_code: "0x3b1c2d8f7e913cb6f6a9d50c2f8e66d1", status: "warning" },
-    { waktu: "14:30:22", aktivitas: "Pakan otomatis 50g", hash_code: "0x7f2aa61ce9d30cb3e4ba6f8f2ffdcf92", status: "success" },
-    { waktu: "15:45:08", aktivitas: "Sensor kalibrasi", hash_code: "0x8a3be17a4480f6fbc2d511ea6732af12", status: "info" },
-    { waktu: "16:20:33", aktivitas: "Pakan otomatis 50g", hash_code: "0x5c1d77ef8e71ce5f911b0224799dbd8d", status: "success" },
-    { waktu: "17:00:55", aktivitas: "Alert: suhu tinggi", hash_code: "0x2e9a33cd7b82e46f94fa7420d6c8aa17", status: "danger" },
-    { waktu: "18:15:19", aktivitas: "Pakan otomatis 50g", hash_code: "0x6d4eb71a89590daf2ca55f0eab2a11f3", status: "success" },
-    { waktu: "18:55:41", aktivitas: "Pompa oksigen otomatis aktif", hash_code: "0x7f11d69cb0f1cf71f4f2e6a886ef8c3a", status: "info" },
-    { waktu: "19:20:03", aktivitas: "Kekeruhan menurun", hash_code: "0x0e6a5d5f6e2c99d2b72a8b3673104e22", status: "success" },
-  ])
+  const [ponds, setPonds] = useState<Pond[]>([])
+  const [telemetry, setTelemetry] = useState<TelemetryByPond>({})
+  const [isLoading, setIsLoading] = useState(true)
+  const [pakanStatus, setPakanStatus] = useState<"aman" | "bahaya">("aman")
+  const [recentLogs, setRecentLogs] = useState<any[]>([])
+  const [lastSynced, setLastSynced] = useState<string>("");
+  const [dashboardChartData, setDashboardChartData] = useState<any[]>([])
+  const [pondOverallStatus, setPondOverallStatus] = useState<"aman" | "waspada" | "bahaya">("aman")
 
-  const [activePondId, setActivePondId] = useState(dummyPonds[0].id)
+  const [activePondId, setActivePondId] = useState<string>("")
   const activePond = useMemo(
-    () => dummyPonds.find((pond) => pond.id === activePondId) ?? dummyPonds[0],
-    [activePondId, dummyPonds],
+    () => ponds.find((pond) => pond.id === activePondId) ?? ponds[0],
+    [activePondId, ponds],
   )
-  const activeTelemetry = dummyTelemetry[activePond.id]
-  const pondStatusMeta = getPoolStatusMeta(activePond.status)
+  const activeTelemetry = activePond && telemetry[activePond.id] ? telemetry[activePond.id] : { ph: 0, suhu: 0, kekeruhan: 0 }
+  const pondStatusMeta = getPoolStatusMeta(pondOverallStatus)
 
-  const chartData = useMemo(
-    () => [
-      { time: "06:00", pH: activeTelemetry.ph - 0.2, kekeruhan: Math.max(0, activeTelemetry.kekeruhan - 1) },
-      { time: "09:00", pH: activeTelemetry.ph + 0.1, kekeruhan: activeTelemetry.kekeruhan },
-      { time: "12:00", pH: activeTelemetry.ph - 0.1, kekeruhan: activeTelemetry.kekeruhan + 1 },
-      { time: "15:00", pH: activeTelemetry.ph + 0.2, kekeruhan: Math.max(0, activeTelemetry.kekeruhan - 1) },
-      { time: "18:00", pH: activeTelemetry.ph, kekeruhan: activeTelemetry.kekeruhan },
-    ],
-    [activeTelemetry],
-  )
-  const kekeruhanDomain = getKekeruhanDomain(chartData)
+  const kekeruhanDomain = getKekeruhanDomain(dashboardChartData)
+
+  // Calculate pond status based on telemetry
+  const calculatePondStatus = (tel: { ph: number; suhu: number; kekeruhan: number }): PondStatus => {
+    const phStatus = getMetricStatus("ph", tel)
+    const suhuStatus = getMetricStatus("suhu", tel)
+    const kekeruhanStatus = getMetricStatus("kekeruhan", tel)
+    
+    if (phStatus === "bahaya" || suhuStatus === "bahaya" || kekeruhanStatus === "bahaya") {
+      return "bahaya"
+    }
+    if (phStatus === "waspada" || suhuStatus === "waspada" || kekeruhanStatus === "waspada") {
+      return "waspada"
+    }
+    return "aman"
+  }
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const API_BASE = "https://backend-aqua-chain.vercel.app"
+        
+        const [pondsRes, telemetryRes, feedRes, fhiRes] = await Promise.all([
+          fetch(`${API_BASE}/api/ponds`),
+          fetch(`${API_BASE}/api/telemetry/pond-001?limit=7`),
+          fetch(`${API_BASE}/api/feeder/pond-001/logs?limit=5`),
+          fetch(`${API_BASE}/api/telemetry/fhi/pond-001`),
+        ])
+
+        if (!pondsRes.ok || !telemetryRes.ok) {
+          throw new Error("Failed to fetch data")
+        }
+
+        const pondsData = await pondsRes.json()
+        const telemetryData = await telemetryRes.json()
+        const feedData = feedRes.ok ? await feedRes.json() : []
+
+        if (fhiRes.ok) {
+          const fhiData = await fhiRes.json()
+          const fhiValue = fhiData.fhi;
+          let finalStatus = "aman";
+          if (fhiValue < 50) {
+            finalStatus = "bahaya";
+          } else if (fhiValue < 80) {
+            finalStatus = "waspada";
+          }
+          setPondOverallStatus(finalStatus);
+        }
+
+        if (feedData.length > 0) {
+          const latestFeed = feedData[0];
+          // Tentukan status kartu pakan
+          setPakanStatus((latestFeed.status === "success" || latestFeed.status === "terkirim") ? "aman" : "bahaya");
+          
+          // Mapping buat tabel log mini
+          const mappedLogs = feedData.map((log: any) => {
+             const d = new Date(log.actual_time || log.scheduled_time);
+             const isSuccess = log.status?.toLowerCase() === "completed" || log.status?.toLowerCase() === "success" || log.status?.toLowerCase() === "terkirim";
+             return {
+               id: log.log_id,
+               waktu: d.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }),
+               aktivitas: `Pakan ${log.target_dosage}Kg ${isSuccess ? 'Sukses' : 'Dibatalkan'}`,
+               statusType: isSuccess ? 'info' : 'warning',
+               hash_code: log.log_id.split('-')[0]
+             }
+          });
+          setRecentLogs(mappedLogs);
+        }
+
+        // Transform ponds data
+        const transformedPonds: Pond[] = pondsData.map((pond: any) => ({
+          id: pond.pond_id,
+          name: pond.name,
+          fish_type: pond.fish_type,
+          capacity: pond.capacity,
+          status: "aman" as PondStatus, // Will be calculated based on telemetry
+        }))
+
+        // Transform telemetry data (get latest for each pond)
+        const telemetryMap: TelemetryByPond = {}
+        if (telemetryData.length > 0) {
+          const latest = telemetryData[0] // Already ordered by timestamp desc
+          telemetryMap["pond-001"] = {
+            ph: latest.ph,
+            suhu: latest.temperature,
+            kekeruhan: latest.turbidity,
+          }
+          const chartFormatted = [...telemetryData].reverse().map((d: any) => ({
+            time: new Date(d.timestamp).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+            pH: d.ph,
+            kekeruhan: d.turbidity
+          }));
+          setDashboardChartData(chartFormatted);
+
+          // Update pond status based on telemetry
+          transformedPonds.forEach((pond: Pond) => {
+            if (pond.id === "pond-001" && telemetryMap["pond-001"]) {
+              pond.status = calculatePondStatus(telemetryMap["pond-001"])
+            }
+          })
+        }
+
+        setPonds(transformedPonds)
+        setTelemetry(telemetryMap)
+        setLastSynced(new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }));
+        
+        if (transformedPonds.length > 0) {
+          setActivePondId(transformedPonds[0].id)
+        }
+      } catch (error) {
+        console.error("Error fetching data:", error)
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    fetchData()
+    const intervalId = setInterval(fetchData, 5000)
+    return () => clearInterval(intervalId)
+  }, [])
+
+  if (isLoading) {
+    return (
+      <div className="flex h-screen w-full bg-slate-100 items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-cyan-600 mx-auto mb-4"></div>
+          <p className="text-slate-600 text-lg">Memuat data...</p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="flex h-screen w-full bg-slate-100">
@@ -174,15 +276,15 @@ export default function Dashboard() {
             </div>
             <div>
               <h2 className={`text-2xl font-bold ${pondStatusMeta.title}`}>Kondisi {pondStatusMeta.label}</h2>
-              <p className="text-slate-700">{activePond.name} - Diperbarui 3 menit lalu</p>
+              <p className="text-slate-700">{activePond.name} - Terakhir sinkron: {lastSynced || "--:--"}</p>
               <p className="text-sm text-slate-500">
-                {activePond.fish_type} - {activePond.capacity} Ekor
+                {activePond.fish_type || "Belum diatur"} - {activePond.capacity || 0} Ekor
               </p>
             </div>
           </div>
 
           <div className="flex gap-4 mb-6 flex-wrap">
-            {dummyPonds.map((pond) => {
+            {ponds.map((pond) => {
               const status = getPoolStatusMeta(pond.status)
               return (
                 <button
@@ -195,7 +297,7 @@ export default function Dashboard() {
                   }`}
                 >
                   <p className="font-semibold text-slate-800">{pond.name}</p>
-                  <p className="text-xs text-slate-500">{pond.fish_type} - {pond.capacity} Ekor</p>
+                  <p className="text-xs text-slate-500">{pond.fish_type || "Belum diatur"} - {pond.capacity || 0} Ekor</p>
                   <span className={`inline-block mt-2 text-xs font-medium px-2 py-1 rounded-full ${status.badge}`}>
                     {status.label}
                   </span>
@@ -264,10 +366,10 @@ export default function Dashboard() {
                     <span className="text-xs text-slate-500 whitespace-nowrap">Status distribusi</span>
                   </div>
                 </div>
-                <StatusBadge status={getMetricStatus("pakan", activeTelemetry)} />
+                <StatusBadge status={pakanStatus} />
               </div>
               <p className="text-3xl font-bold text-teal-600 mt-4 text-center">
-                {getMetricStatus("pakan", activeTelemetry) === "bahaya" ? "Tertunda" : "Terpenuhi"}
+                {pakanStatus === "bahaya" ? "Tertunda" : "Terpenuhi"}
               </p>
             </div>
           </div>
@@ -278,7 +380,7 @@ export default function Dashboard() {
             <h3 className="text-xl font-bold text-cyan-700 mb-4 text-center">Grafik Fluktuasi Air</h3>
             <div className="flex-1">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={chartData} margin={{ top: 5, right: 30, left: 0, bottom: 5 }}>
+                <BarChart data={dashboardChartData} margin={{ top: 5, right: 30, left: 0, bottom: 5 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                   <XAxis dataKey="time" stroke="#64748b" />
                   <YAxis
@@ -331,22 +433,39 @@ export default function Dashboard() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {dummyLogs.map((log) => (
-                      <tr key={`${log.waktu}-${log.hash_code}`} className="hover:bg-slate-50 transition-colors">
-                        <td className="py-3 px-4 text-slate-600 whitespace-nowrap">{log.waktu}</td>
+                    {recentLogs.length > 0 ? (
+                      recentLogs.map((log) => (
+                        <tr key={log.id} className="hover:bg-slate-50 transition-colors">
+                          <td className="py-3 px-4 text-slate-600 whitespace-nowrap">{log.waktu}</td>
+                          <td className="py-3 px-4">
+                            <div className="flex items-center gap-2">
+                              <LogStatusDot status={log.statusType as any} />
+                              <span className="text-slate-700">{log.aktivitas}</span>
+                            </div>
+                          </td>
+                          <td className="py-3 px-4">
+                            <code className="text-cyan-600 bg-cyan-50 px-2 py-0.5 rounded text-xs font-mono uppercase">
+                              {log.hash_code}
+                            </code>
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr className="hover:bg-slate-50 transition-colors">
+                        <td className="py-3 px-4 text-slate-600 whitespace-nowrap">-</td>
                         <td className="py-3 px-4">
-                          <div className="flex items-center">
-                            <LogStatusDot status={log.status} />
-                            <span className="text-slate-700">{log.aktivitas}</span>
+                          <div className="flex items-center gap-2">
+                            <LogStatusDot status="info" />
+                            <span className="text-slate-700">Belum ada aktivitas pakan</span>
                           </div>
                         </td>
                         <td className="py-3 px-4">
                           <code className="text-cyan-600 bg-cyan-50 px-2 py-0.5 rounded text-xs font-mono">
-                            {getShortHash(log.hash_code)}
+                            -
                           </code>
                         </td>
                       </tr>
-                    ))}
+                    )}
                   </tbody>
                 </table>
               </div>

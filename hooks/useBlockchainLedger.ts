@@ -1,7 +1,6 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import { fetchLedgerRecords } from "@/lib/blockchain/fetch-ledger"
 import type { BlockchainConnectionStatus, LedgerRecord } from "@/lib/blockchain/types"
 
 export interface UseBlockchainLedgerState {
@@ -29,12 +28,49 @@ export function useBlockchainLedger(): UseBlockchainLedgerState {
     setIsLoading(true)
     setError(null)
     try {
-      const res = await fetchLedgerRecords()
-      setConnectionStatus(res.connectionStatus)
-      setRecords(res.records)
-      setLastSyncedAt(res.lastSyncedAt)
-    } catch {
-      setError("Gagal memuat ledger. Periksa koneksi atau coba lagi.")
+      const res = await fetch("https://backend-aqua-chain.vercel.app/api/blockchain/logs/pond-001")
+      if (!res.ok) throw new Error("Gagal mengambil data blockchain")
+      
+      const rawData = await res.json()
+      
+      // Pastikan kita mengambil array-nya, baik itu langsung atau di dalam properti .data
+      const logsArray = Array.isArray(rawData) ? rawData : (rawData.data || [])
+
+      const mappedRecords: LedgerRecord[] = logsArray.map((item: any) => {
+        const dateObj = new Date(item.timestamp)
+        
+        // Pemetaan status agar sesuai dengan UI
+        let uiStatus: "Verified" | "Pending" | "Flagged" = "Pending"
+        const statusFromDB = item.verification_status?.toLowerCase()
+        
+        if (statusFromDB === "verified") uiStatus = "Verified"
+        else if (statusFromDB === "flagged") uiStatus = "Flagged"
+
+        return {
+          id: item.blockchain_id || item.id,
+          waktu: dateObj.toLocaleDateString("id-ID", { 
+            day: "2-digit", 
+            month: "short", 
+            year: "numeric", 
+            hour: "2-digit", 
+            minute: "2-digit" 
+          }),
+          tipe: "Pencatatan Telemetri", 
+          transactionHash: item.tx_hash || "N/A",
+          status: uiStatus,
+          payloadFields: [
+            { label: "Block Number", value: item.block_number?.toString() || "Menunggu" },
+            { label: "Log ID", value: item.log_id || "N/A" }
+          ]
+        }
+      })
+
+      setRecords(mappedRecords)
+      setConnectionStatus("active")
+      
+    } catch (err) {
+      console.error(err)
+      setError("Gagal memuat ledger. Periksa koneksi ke Vercel atau coba lagi.")
       setRecords([])
       setConnectionStatus("inactive")
       setLastSyncedAt(null)

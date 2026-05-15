@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { AlertTriangle } from "lucide-react"
 import {
   LineChart,
@@ -19,98 +19,24 @@ import { Sidebar } from "@/components/sidebar"
 import { PageHeader } from "@/components/page-header"
 import { AlertStatusBadge } from "@/components/status-badges"
 
-// ============================================
-// DATA - Mudah untuk di-replace dengan API fetch
-// ============================================
-
-// Data tren mingguan (7 hari)
-const weeklyTrendData = [
-  { date: "06/04", pH: 7.2, kekeruhan: 3 },
-  { date: "07/04", pH: 7.0, kekeruhan: 5 },
-  { date: "08/04", pH: 7.5, kekeruhan: 8 },
-  { date: "09/04", pH: 7.3, kekeruhan: 4 },
-  { date: "10/04", pH: 7.8, kekeruhan: 6 },
-  { date: "11/04", pH: 7.1, kekeruhan: 3 },
-  { date: "12/04", pH: 7.4, kekeruhan: 2 },
-]
-
-// Data tren 24 jam
-const dailyTrendData = [
-  { date: "00:00", pH: 7.1, kekeruhan: 4 },
-  { date: "04:00", pH: 7.0, kekeruhan: 4 },
-  { date: "08:00", pH: 7.2, kekeruhan: 5 },
-  { date: "12:00", pH: 7.4, kekeruhan: 6 },
-  { date: "16:00", pH: 7.3, kekeruhan: 5 },
-  { date: "20:00", pH: 7.2, kekeruhan: 4 },
-]
-
-// Data tren 30 hari
-const monthlyTrendData = [
-  { date: "W1", pH: 7.2, kekeruhan: 5 },
-  { date: "W2", pH: 7.4, kekeruhan: 8 },
-  { date: "W3", pH: 7.1, kekeruhan: 4 },
-  { date: "W4", pH: 7.3, kekeruhan: 3 },
-]
-
-// Data FHI mingguan (Filter Health Index)
-const fhiData = [
-  { date: "06/04", fhi: 85, status: "good" },
-  { date: "07/04", fhi: 78, status: "good" },
-  { date: "08/04", fhi: 45, status: "warning" },
-  { date: "09/04", fhi: 92, status: "good" },
-  { date: "10/04", fhi: 25, status: "danger" },
-  { date: "11/04", fhi: 88, status: "good" },
-  { date: "12/04", fhi: 95, status: "good" },
-]
-
-// Data peringatan dini
-const alertData = [
-  { tanggal: "06 April 2026", parameter: "pH melampaui batas", status: "auto" as const },
-  { tanggal: "08 April 2026", parameter: "Kekeruhan air naik drastis", status: "resolved" as const },
-  { tanggal: "09 April 2026", parameter: "pH melampaui batas", status: "auto" as const },
-  { tanggal: "11 April 2026", parameter: "Kekeruhan air naik drastis", status: "resolved" as const },
-  { tanggal: "12 April 2026", parameter: "Kekeruhan air naik drastis", status: "resolved" as const },
-]
-
-// ============================================
-// HELPERS
-// ============================================
-
 type TimeFilter = "24jam" | "7hari" | "30hari"
-
-const getTrendData = (filter: TimeFilter) => {
-  switch (filter) {
-    case "24jam":
-      return dailyTrendData
-    case "7hari":
-      return weeklyTrendData
-    case "30hari":
-      return monthlyTrendData
-    default:
-      return weeklyTrendData
-  }
-}
 
 const getFhiBarColor = (status: string) => {
   switch (status) {
-    case "good":
-      return "#22c55e"
-    case "warning":
-      return "#eab308"
-    case "danger":
-      return "#ef4444"
-    default:
-      return "#22c55e"
+    case "good": return "#22c55e"
+    case "warning": return "#eab308"
+    case "danger": return "#ef4444"
+    default: return "#22c55e"
   }
 }
 
-// ============================================
-// COMPONENT
-// ============================================
-
 export default function Analitik() {
+  // state
   const [timeFilter, setTimeFilter] = useState<TimeFilter>("7hari")
-  const trendData = getTrendData(timeFilter)
+  const [rawTelemetry, setRawTelemetry] = useState<any[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [fhiHistoryData, setFhiHistoryData] = useState<any[]>([]);
+  const [alertHistoryData, setAlertHistoryData] = useState<any[]>([]);
 
   const timeFilters = [
     { key: "24jam" as const, label: "24 Jam Terakhir" },
@@ -118,6 +44,98 @@ export default function Analitik() {
     { key: "30hari" as const, label: "30 Hari Terakhir" },
   ]
 
+  // fetch data
+  const [fhiScore, setFhiScore] = useState(100);
+  const [currentAlerts, setCurrentAlerts] = useState([]);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const API_BASE = "https://backend-aqua-chain.vercel.app";
+        
+        const [telemetryRes, fhiRes, alertsRes] = await Promise.all([
+          fetch(`${API_BASE}/api/telemetry/pond-001?limit=100`),
+          fetch(`${API_BASE}/api/telemetry/fhiHistory/pond-001`),
+          fetch(`${API_BASE}/api/telemetry/alertsHistory/pond-001`)
+        ]);
+
+        if (telemetryRes.ok) {
+          const data = await telemetryRes.json();
+          setRawTelemetry(data.reverse());
+        }
+
+        if (fhiRes.ok) {
+          const fhiHistoryData = await fhiRes.json();
+          
+          const formattedFhi = fhiHistoryData.reverse().map((d: any) => ({
+            date: new Date(d.date).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+            fhi: d.fhi,
+            status: d.status
+          }));
+          setFhiHistoryData(formattedFhi);
+        }
+
+        if (alertsRes.ok) {
+          const alertsData = await alertsRes.json();
+          const formattedAlerts = alertsData.map((d: any) => ({
+            tanggal: new Date(d.tanggal).toLocaleDateString("id-ID", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }),
+            parameter: d.parameter,
+            status: d.status
+          }));
+          setAlertHistoryData(formattedAlerts);
+        }
+      } catch (error) {
+        console.error("Gagal sinkronisasi API BE:", error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchData();
+    const intervalId = setInterval(fetchData, 5000);
+    return () => clearInterval(intervalId);
+  }, []);
+
+  // grafik tren
+  const trendData = useMemo(() => {
+    let sliceCount = rawTelemetry.length;
+    if (timeFilter === "24jam") sliceCount = Math.min(24, rawTelemetry.length);
+    if (timeFilter === "7hari") sliceCount = Math.min(70, rawTelemetry.length);
+
+    return rawTelemetry.slice(-sliceCount).map(d => {
+      const dateObj = new Date(d.timestamp);
+      let formattedTime = "";
+      
+      // Logika dinamis untuk Sumbu X
+      if (timeFilter === "24jam") {
+        formattedTime = dateObj.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
+      } else if (timeFilter === "7hari") {
+        formattedTime = dateObj.toLocaleDateString("id-ID", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+      } else {
+        formattedTime = dateObj.toLocaleDateString("id-ID", { day: "2-digit", month: "short" });
+      }
+
+      return {
+        date: formattedTime,
+        // fullTime ini yang akan dipakai oleh Tooltip semua grafik
+        fullTime: dateObj.toLocaleString("id-ID", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+        pH: d.ph,
+        kekeruhan: d.turbidity,
+        suhu: d.temperature
+      };
+    });
+  }, [rawTelemetry, timeFilter]);
+
+  // loading
+  if (isLoading) {
+    return (
+      <div className="flex h-screen w-full bg-slate-100 items-center justify-center">
+        <p className="text-slate-600 font-medium animate-pulse">Menyusun analitik data kolam...</p>
+      </div>
+    )
+  }
+
+  // tampilan utama UI
   return (
     <div className="flex h-screen w-full bg-slate-100">
       <Sidebar />
@@ -164,14 +182,11 @@ export default function Analitik() {
                 <LineChart data={trendData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                   <XAxis dataKey="date" stroke="#64748b" fontSize={12} />
-                  <YAxis stroke="#64748b" fontSize={12} domain={[0, 20]} ticks={[0, 4, 8, 12, 16, 20]} />
+                  <YAxis stroke="#64748b" fontSize={12} domain={['dataMin - 5', 'dataMax + 5']} tickFormatter={(value) => value.toFixed(1)} />
                   <Tooltip
-                    contentStyle={{
-                      backgroundColor: "white",
-                      border: "1px solid #e2e8f0",
-                      borderRadius: "8px",
-                    }}
-                    formatter={(value: number) => [`${value}%`, "Kekeruhan"]}
+                    contentStyle={{ backgroundColor: "white", border: "1px solid #e2e8f0", borderRadius: "8px" }}
+                    labelFormatter={(value, payload) => payload[0]?.payload?.fullTime || value}
+                    formatter={(value: number) => [`${value}`, "Kekeruhan"]}
                   />
                   <Line
                     type="monotone"
@@ -197,14 +212,11 @@ export default function Analitik() {
                 <LineChart data={trendData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                   <XAxis dataKey="date" stroke="#64748b" fontSize={12} />
-                  <YAxis stroke="#64748b" fontSize={12} domain={[0, 10]} ticks={[0, 2, 4, 6, 8, 10]} />
+                  <YAxis stroke="#64748b" fontSize={12} domain={['dataMin - 0.5', 'dataMax + 0.5']} tickFormatter={(value) => value.toFixed(1)} />
                   <Tooltip
-                    contentStyle={{
-                      backgroundColor: "white",
-                      border: "1px solid #e2e8f0",
-                      borderRadius: "8px",
-                    }}
-                    formatter={(value: number) => [value, "pH"]}
+                    contentStyle={{ backgroundColor: "white", border: "1px solid #e2e8f0", borderRadius: "8px" }}
+                    labelFormatter={(value, payload) => payload[0]?.payload?.fullTime || value}
+                    formatter={(value: number) => [`${value}`, "pH"]}
                   />
                   <Line
                     type="monotone"
@@ -217,6 +229,28 @@ export default function Analitik() {
                 </LineChart>
               </ResponsiveContainer>
             </div>
+
+            {/* Grafik Suhu */}
+            <div>
+              <div className="flex items-center justify-end mb-2">
+                <div className="flex items-center gap-2">
+                  <span className="w-3 h-3 rounded-full bg-orange-500"></span>
+                  <span className="text-sm text-slate-600">Suhu (°C)</span>
+                </div>
+              </div>
+              <ResponsiveContainer width="100%" height={200}>
+                <LineChart data={trendData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                  <XAxis dataKey="date" stroke="#64748b" fontSize={12} />
+                  <YAxis stroke="#64748b" fontSize={12} domain={['dataMin - 1', 'dataMax + 1']} tickFormatter={(value) => value.toFixed(1)} />
+                  <Tooltip
+                    labelFormatter={(value, payload) => payload[0]?.payload?.fullTime} // Gunakan waktu lengkap
+                    formatter={(value: number) => [`${value}°C`, "Suhu"]}
+                  />
+                  <Line type="monotone" dataKey="suhu" stroke="#f97316" strokeWidth={2} dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
           </div>
         </div>
 
@@ -225,24 +259,23 @@ export default function Analitik() {
           {/* FHI Bar Chart */}
           <div className="bg-white rounded-xl p-6 shadow-sm">
             <h3 className="text-xl font-bold text-slate-800 mb-6 text-center">
-              Kondisi Filter Mingguan
+              Kondisi Filter Terakhir
             </h3>
             <ResponsiveContainer width="100%" height={280}>
-              <BarChart data={fhiData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+              <BarChart data={fhiHistoryData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="date" stroke="#64748b" fontSize={12} />
+                <XAxis dataKey="date" stroke="#64748b" fontSize={10} interval={0} angle={-45} textAnchor="end" height={60} />
                 <YAxis stroke="#64748b" fontSize={12} domain={[0, 100]} ticks={[0, 20, 40, 60, 80, 100]} />
                 <Tooltip
-                  contentStyle={{
-                    backgroundColor: "white",
-                    border: "1px solid #e2e8f0",
-                    borderRadius: "8px",
-                  }}
+                  contentStyle={{ backgroundColor: "white", border: "1px solid #e2e8f0", borderRadius: "8px" }}
                   formatter={(value: number) => [`${value}%`, "FHI"]}
                 />
-                <Legend formatter={() => "FHI (%)"} />
+                <Legend 
+                  formatter={() => <span className="text-slate-600 font-medium">Skor FHI (%)</span>} 
+                  iconType="circle" 
+                />
                 <Bar dataKey="fhi" radius={[4, 4, 0, 0]}>
-                  {fhiData.map((entry, index) => (
+                  {fhiHistoryData.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={getFhiBarColor(entry.status)} />
                   ))}
                 </Bar>
@@ -250,12 +283,10 @@ export default function Analitik() {
             </ResponsiveContainer>
           </div>
 
-          {/* Peringatan Dini Table - Enhanced Warning Style */}
+          {/* Peringatan Dini Table */}
           <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-xl shadow-sm overflow-hidden flex flex-col border-2 border-amber-300 relative">
-            {/* Animated Warning Glow Effect */}
             <div className="absolute inset-0 bg-amber-400/10 animate-pulse pointer-events-none"></div>
             
-            {/* Header with Warning Styling */}
             <div className="p-4 bg-gradient-to-r from-amber-500 to-orange-500 flex items-center gap-3 relative">
               <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center animate-bounce">
                 <AlertTriangle className="text-white" size={22} />
@@ -264,9 +295,8 @@ export default function Analitik() {
                 <h3 className="text-xl font-bold text-white">Peringatan Dini Tercatat</h3>
                 <p className="text-amber-100 text-xs">Anomali terdeteksi dalam periode ini</p>
               </div>
-              {/* Alert Count Badge */}
               <div className="ml-auto bg-red-500 text-white px-3 py-1 rounded-full text-sm font-bold shadow-lg animate-pulse">
-                {alertData.length} Alert
+                {alertHistoryData.length} Alert
               </div>
             </div>
 
@@ -274,19 +304,13 @@ export default function Analitik() {
               <table className="w-full text-sm">
                 <thead className="bg-amber-100/50 border-b border-amber-200">
                   <tr>
-                    <th className="text-left py-3 px-4 font-semibold text-amber-800 uppercase text-xs tracking-wider">
-                      Tanggal
-                    </th>
-                    <th className="text-left py-3 px-4 font-semibold text-amber-800 uppercase text-xs tracking-wider">
-                      Parameter Anomali
-                    </th>
-                    <th className="text-left py-3 px-4 font-semibold text-amber-800 uppercase text-xs tracking-wider">
-                      Status Penanganan
-                    </th>
+                    <th className="text-left py-3 px-4 font-semibold text-amber-800 uppercase text-xs tracking-wider">Tanggal</th>
+                    <th className="text-left py-3 px-4 font-semibold text-amber-800 uppercase text-xs tracking-wider">Parameter Anomali</th>
+                    <th className="text-left py-3 px-4 font-semibold text-amber-800 uppercase text-xs tracking-wider">Status</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-amber-100 bg-white/70">
-                  {alertData.map((alert, index) => (
+                  {alertHistoryData.length > 0 ? alertHistoryData.map((alert, index) => (
                     <tr key={index} className="hover:bg-amber-50 transition-colors">
                       <td className="py-3 px-4 text-slate-600 whitespace-nowrap font-medium">{alert.tanggal}</td>
                       <td className="py-3 px-4 text-slate-700 flex items-center gap-2">
@@ -294,25 +318,16 @@ export default function Analitik() {
                         {alert.parameter}
                       </td>
                       <td className="py-3 px-4">
-                        <AlertStatusBadge status={alert.status} />
+                        <AlertStatusBadge status={alert.status as any} />
                       </td>
                     </tr>
-                  ))}
+                  )) : (
+                    <tr>
+                      <td colSpan={3} className="py-8 text-center text-amber-700">Tidak ada anomali terdeteksi.</td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
-            </div>
-
-            {/* Summary Footer with Warning Colors */}
-            <div className="p-4 border-t border-amber-200 bg-amber-100/50 relative">
-              <div className="flex justify-between items-center text-sm">
-                <span className="text-amber-800 font-medium">
-                  Total Peringatan: <strong className="text-amber-900">{alertData.length}</strong>
-                </span>
-                <span className="text-green-700 font-semibold flex items-center gap-1">
-                  <span className="w-2 h-2 rounded-full bg-green-500"></span>
-                  {alertData.filter(a => a.status === "resolved").length} Normal Kembali
-                </span>
-              </div>
             </div>
           </div>
         </div>
