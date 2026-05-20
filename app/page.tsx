@@ -47,7 +47,7 @@ type LogItem = { waktu: string; aktivitas: string; hash_code: string; status: st
 // Skema Validasi untuk Tambah Kolam
 const pondSchema = z.object({
   name: z.string().min(1, "Nama kolam wajib diisi"),
-  fishtype: z.string().min(1, "Jenis ikan wajib diisi"),
+  fish_type: z.string().min(1, "Jenis ikan wajib diisi"),
   capacity: z.coerce.number().min(1, "Kapasitas harus lebih dari 0"),
   status: z.enum(["active", "inactive", "maintenance"]).default("active"),
 })
@@ -179,7 +179,7 @@ export default function Dashboard() {
         const transformedPonds: Pond[] = pondsData.map((pond: any) => ({
           id: pond.pond_id.toString(), // Ubah jadi string agar aman jika dari BE dikirim berupa angka
           name: pond.name,
-          fish_type: pond.fishtype || pond.fish_type,
+          fish_type: pond.fish_type,
           capacity: pond.capacity,
           status: "aman" as PondStatus,
         }))
@@ -394,8 +394,8 @@ export default function Dashboard() {
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">Jenis Ikan</label>
-                    <input {...register("fishtype")} className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-md focus:outline-cyan-500" placeholder="Contoh: Nila" />
-                    {errors.fishtype && <p className="text-red-500 text-xs mt-1">{errors.fishtype.message}</p>}
+                    <input {...register("fish_type")} className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-md focus:outline-cyan-500" placeholder="Contoh: Nila" />
+                    {errors.fish_type && <p className="text-red-500 text-xs mt-1">{errors.fish_type.message}</p>}
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">Kapasitas (Ekor)</label>
