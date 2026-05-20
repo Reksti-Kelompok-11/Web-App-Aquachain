@@ -28,7 +28,7 @@ export function useBlockchainLedger(): UseBlockchainLedgerState {
     setIsLoading(true)
     setError(null)
     try {
-      const res = await fetch("https://backend-aqua-chain.vercel.app/api/blockchain/logs/1")
+      const res = await fetch("https://backend-aqua-chain.vercel.app/api/blockchain/logs/pond-001")
       if (!res.ok) throw new Error("Gagal mengambil data blockchain")
       
       const rawData = await res.json()

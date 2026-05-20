@@ -11,7 +11,6 @@ import {
   AlertTriangle,
   XCircle,
   Shield,
-  Plus,
 } from "lucide-react"
 import {
   BarChart,
@@ -27,12 +26,6 @@ import { Sidebar } from "@/components/sidebar"
 import { PageHeader } from "@/components/page-header"
 import { StatusBadge, LogStatusDot, MetricStatus } from "@/components/status-badges"
 
-import { useForm } from "react-hook-form"
-import { zodResolver } from "@hookform/resolvers/zod"
-import * as z from "zod"
-import { toast } from "sonner"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from "@/components/ui/dialog"
-
 type PondStatus = "aman" | "waspada" | "bahaya"
 type Pond = {
   id: string
@@ -43,16 +36,6 @@ type Pond = {
 }
 type TelemetryByPond = Record<string, { ph: number; suhu: number; kekeruhan: number }>
 type LogItem = { waktu: string; aktivitas: string; hash_code: string; status: string }
-
-// Skema Validasi untuk Tambah Kolam
-const pondSchema = z.object({
-  name: z.string().min(1, "Nama kolam wajib diisi"),
-  fishtype: z.string().min(1, "Jenis ikan wajib diisi"),
-  capacity: z.coerce.number().min(1, "Kapasitas harus lebih dari 0"),
-  status: z.enum(["active", "inactive", "maintenance"]).default("active"),
-})
-
-type PondFormValues = z.infer<typeof pondSchema>
 
 const getKekeruhanDomain = (data: { kekeruhan: number }[]) => {
   const maxKekeruhan = Math.max(...data.map((d) => d.kekeruhan))
@@ -131,19 +114,10 @@ export default function Dashboard() {
   const [pondOverallStatus, setPondOverallStatus] = useState<"aman" | "waspada" | "bahaya">("aman")
 
   const [activePondId, setActivePondId] = useState<string>("")
-  const [isAddingPond, setIsAddingPond] = useState(false)
-  const [isDialogOpen, setIsDialogOpen] = useState(false)
-
-  // Setup Form
-  const { register, handleSubmit, reset, formState: { errors } } = useForm<PondFormValues>({
-    resolver: zodResolver(pondSchema),
-    defaultValues: { status: "active" }
-  })
   const activePond = useMemo(
-    () => ponds.find((pond) => pond.id === activePondId) ?? ponds[0] ?? null,
+    () => ponds.find((pond) => pond.id === activePondId) ?? ponds[0],
     [activePondId, ponds],
   )
-
   const activeTelemetry = activePond && telemetry[activePond.id] ? telemetry[activePond.id] : { ph: 0, suhu: 0, kekeruhan: 0 }
   const pondStatusMeta = getPoolStatusMeta(pondOverallStatus)
 
@@ -168,100 +142,93 @@ export default function Dashboard() {
     const fetchData = async () => {
       try {
         const API_BASE = "https://backend-aqua-chain.vercel.app"
-
-        // 1. Fetch SEMUA daftar kolam terlebih dahulu
-        const pondsRes = await fetch(`${API_BASE}/api/ponds`).catch(() => null)
-        if (!pondsRes || !pondsRes.ok) throw new Error("Gagal mengambil data kolam")
-
-        const pondsData = await pondsRes.json()
         
-        // Format data kolam
-        const transformedPonds: Pond[] = pondsData.map((pond: any) => ({
-          id: pond.pond_id.toString(), // Ubah jadi string agar aman jika dari BE dikirim berupa angka
-          name: pond.name,
-          fish_type: pond.fishtype || pond.fish_type,
-          capacity: pond.capacity,
-          status: "aman" as PondStatus,
-        }))
+        const [pondsRes, telemetryRes, feedRes, fhiRes] = await Promise.all([
+          fetch(`${API_BASE}/api/ponds`),
+          fetch(`${API_BASE}/api/telemetry/pond-001?limit=7`),
+          fetch(`${API_BASE}/api/feeder/pond-001/logs?limit=5`),
+          fetch(`${API_BASE}/api/telemetry/fhi/pond-001`),
+        ])
 
-        // 2. Tentukan ID Kolam yang sedang AKTIF
-        // Jika belum ada yang di-klik, otomatis gunakan ID dari kolam urutan pertama
-        const currentActiveId = activePondId || (transformedPonds.length > 0 ? transformedPonds[0].id : null)
-        
-        if (!activePondId && currentActiveId) {
-          setActivePondId(currentActiveId)
+        if (!pondsRes.ok || !telemetryRes.ok) {
+          throw new Error("Failed to fetch data")
         }
 
-        // 3. Hanya jalankan fetch data sensor JIKA ada kolam yang aktif
-        if (currentActiveId) {
-          const [telemetryRes, feedRes, fhiRes] = await Promise.all([
-            fetch(`${API_BASE}/api/telemetry/${currentActiveId}?limit=7`).catch(() => null),
-            fetch(`${API_BASE}/api/feeder/${currentActiveId}/logs?limit=5`).catch(() => null),
-            fetch(`${API_BASE}/api/telemetry/fhi/${currentActiveId}`).catch(() => null),
-          ])
+        const pondsData = await pondsRes.json()
+        const telemetryData = await telemetryRes.json()
+        const feedData = feedRes.ok ? await feedRes.json() : []
 
-          const telemetryData = telemetryRes && telemetryRes.ok ? await telemetryRes.json() : []
-          const feedData = feedRes && feedRes.ok ? await feedRes.json() : []
-
-          if (fhiRes && fhiRes.ok) {
-            const fhiData = await fhiRes.json()
-            const fhiValue = fhiData.fhi
-            let finalStatus: PondStatus = "aman"
-            if (fhiValue < 50) finalStatus = "bahaya"
-            else if (fhiValue < 80) finalStatus = "waspada"
-            setPondOverallStatus(finalStatus)
+        if (fhiRes.ok) {
+          const fhiData = await fhiRes.json()
+          const fhiValue = fhiData.fhi;
+          let finalStatus = "aman";
+          if (fhiValue < 50) {
+            finalStatus = "bahaya";
+          } else if (fhiValue < 80) {
+            finalStatus = "waspada";
           }
+          setPondOverallStatus(finalStatus);
+        }
 
-          if (feedData.length > 0) {
-            const latestFeed = feedData[0]
-            setPakanStatus((latestFeed.status === "success" || latestFeed.status === "terkirim") ? "aman" : "bahaya")
-            const mappedLogs = feedData.map((log: any) => {
-              const d = new Date(log.actual_time || log.scheduled_time)
-              const isSuccess = log.status?.toLowerCase() === "completed" || log.status?.toLowerCase() === "success" || log.status?.toLowerCase() === "terkirim"
-              return {
-                id: log.log_id,
-                waktu: d.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }),
-                aktivitas: `Pakan ${log.target_dosage}Kg ${isSuccess ? 'Sukses' : 'Batal'}`,
-                statusType: isSuccess ? 'info' : 'warning',
-                hash_code: log.log_id.split('-')[0]
-              }
-            })
-            setRecentLogs(mappedLogs)
-          } else {
-             setRecentLogs([]) // Kosongkan tabel jika log pakan kosong
+        if (feedData.length > 0) {
+          const latestFeed = feedData[0];
+          // Tentukan status kartu pakan
+          setPakanStatus((latestFeed.status === "success" || latestFeed.status === "terkirim") ? "aman" : "bahaya");
+          
+          // Mapping buat tabel log mini
+          const mappedLogs = feedData.map((log: any) => {
+             const d = new Date(log.actual_time || log.scheduled_time);
+             const isSuccess = log.status?.toLowerCase() === "completed" || log.status?.toLowerCase() === "success" || log.status?.toLowerCase() === "terkirim";
+             return {
+               id: log.log_id,
+               waktu: d.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }),
+               aktivitas: `Pakan ${log.target_dosage}Kg ${isSuccess ? 'Sukses' : 'Dibatalkan'}`,
+               statusType: isSuccess ? 'info' : 'warning',
+               hash_code: log.log_id.split('-')[0]
+             }
+          });
+          setRecentLogs(mappedLogs);
+        }
+
+        // Transform ponds data
+        const transformedPonds: Pond[] = pondsData.map((pond: any) => ({
+          id: pond.pond_id,
+          name: pond.name,
+          fish_type: pond.fish_type,
+          capacity: pond.capacity,
+          status: "aman" as PondStatus, // Will be calculated based on telemetry
+        }))
+
+        // Transform telemetry data (get latest for each pond)
+        const telemetryMap: TelemetryByPond = {}
+        if (telemetryData.length > 0) {
+          const latest = telemetryData[0] // Already ordered by timestamp desc
+          telemetryMap["pond-001"] = {
+            ph: latest.ph,
+            suhu: latest.temperature,
+            kekeruhan: latest.turbidity,
           }
+          const chartFormatted = [...telemetryData].reverse().map((d: any) => ({
+            time: new Date(d.timestamp).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+            pH: d.ph,
+            kekeruhan: d.turbidity
+          }));
+          setDashboardChartData(chartFormatted);
 
-          const telemetryMap: TelemetryByPond = {}
-          if (telemetryData.length > 0) {
-            const latest = telemetryData[0]
-            telemetryMap[currentActiveId] = {
-              ph: latest.ph,
-              suhu: latest.temperature,
-              kekeruhan: latest.turbidity,
+          // Update pond status based on telemetry
+          transformedPonds.forEach((pond: Pond) => {
+            if (pond.id === "pond-001" && telemetryMap["pond-001"]) {
+              pond.status = calculatePondStatus(telemetryMap["pond-001"])
             }
-            const chartFormatted = [...telemetryData].reverse().map((d: any) => ({
-              time: new Date(d.timestamp).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
-              pH: d.ph,
-              kekeruhan: d.turbidity
-            }))
-            setDashboardChartData(chartFormatted)
+          })
+        }
 
-            transformedPonds.forEach((pond: Pond) => {
-              if (pond.id === currentActiveId && telemetryMap[currentActiveId]) {
-                pond.status = calculatePondStatus(telemetryMap[currentActiveId])
-              }
-            })
-          } else {
-            setDashboardChartData([]) // Kosongkan grafik jika data sensor kosong
-          }
-
-          setPonds(transformedPonds)
-          setTelemetry(telemetryMap)
-          setLastSynced(new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }))
-        } else {
-          // Fallback jika belum ada kolam sama sekali di database
-          setPonds(transformedPonds)
-          setLastSynced(new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }))
+        setPonds(transformedPonds)
+        setTelemetry(telemetryMap)
+        setLastSynced(new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }));
+        
+        if (transformedPonds.length > 0) {
+          setActivePondId(transformedPonds[0].id)
         }
       } catch (error) {
         console.error("Error fetching data:", error)
@@ -273,38 +240,7 @@ export default function Dashboard() {
     fetchData()
     const intervalId = setInterval(fetchData, 5000)
     return () => clearInterval(intervalId)
-  }, [activePondId]) 
-
-  const onSubmitNewPond = async (data: PondFormValues) => {
-    setIsAddingPond(true)
-    try {
-      const API_BASE = "https://backend-aqua-chain.vercel.app"
-      const response = await fetch(`${API_BASE}/api/ponds`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      })
-
-      // Cek jika API mengembalikan error (misal: 400 atau 500)
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => null)
-        throw new Error(errorData?.error || "Gagal menyimpan ke database. Cek kolom Supabase.")
-      }
-
-      toast.success("Kolam berhasil ditambahkan!")
-      reset()
-      setIsDialogOpen(false)
-
-      // Refresh halaman secara otomatis agar kartu kolam baru langsung ter-render
-      window.location.reload()
-      
-    } catch (error: any) {
-      console.error("Error Tambah Kolam:", error)
-      toast.error(error.message)
-    } finally {
-      setIsAddingPond(false)
-    }
-  }
+  }, [])
 
   if (isLoading) {
     return (
@@ -334,21 +270,16 @@ export default function Dashboard() {
             <div
               className={`w-14 h-14 rounded-full ${pondStatusMeta.iconBg} flex items-center justify-center flex-shrink-0 shadow-[0_0_18px_rgba(15,23,42,0.22)]`}
             >
-              {activePond?.status === "aman" && <CheckCircle2 size={28} className="text-white" />}
-              {activePond?.status === "waspada" && <AlertTriangle size={28} className="text-white" />}
-              {activePond?.status === "bahaya" && <XCircle size={28} className="text-white" />}
-              {!activePond && <Activity size={28} className="text-white" />}
+              {activePond.status === "aman" && <CheckCircle2 size={28} className="text-white" />}
+              {activePond.status === "waspada" && <AlertTriangle size={28} className="text-white" />}
+              {activePond.status === "bahaya" && <XCircle size={28} className="text-white" />}
             </div>
             <div>
-              <h2 className={`text-2xl font-bold ${pondStatusMeta.title}`}>
-                Kondisi {activePond ? pondStatusMeta.label : "Belum ada kolam"}
-              </h2>
-              <p className="text-slate-700">{activePond?.name || "Silakan tambahkan kolam terlebih dahulu"} - Terakhir sinkron: {lastSynced || "--:--"}</p>
-              {activePond && (
-                <p className="text-sm text-slate-500">
-                  {activePond.fish_type || "Belum diatur"} - {activePond.capacity || 0} Ekor
-                </p>
-              )}
+              <h2 className={`text-2xl font-bold ${pondStatusMeta.title}`}>Kondisi {pondStatusMeta.label}</h2>
+              <p className="text-slate-700">{activePond.name} - Terakhir sinkron: {lastSynced || "--:--"}</p>
+              <p className="text-sm text-slate-500">
+                {activePond.fish_type || "Belum diatur"} - {activePond.capacity || 0} Ekor
+              </p>
             </div>
           </div>
 
@@ -373,41 +304,6 @@ export default function Dashboard() {
                 </button>
               )
             })}
-            {/* Tombol & Modal Tambah Kolam */}
-            <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-              <DialogTrigger asChild>
-                <button className="flex items-center gap-2 px-5 py-3 h-[72px] rounded-lg border-2 border-dashed border-slate-400/70 text-slate-600 hover:text-cyan-700 hover:border-cyan-500 hover:bg-cyan-50/50 transition-all">
-                  <Plus size={20} />
-                  <span className="font-semibold">Tambah Kolam</span>
-                </button>
-              </DialogTrigger>
-              <DialogContent className="sm:max-w-[425px]">
-                <DialogHeader>
-                  <DialogTitle className="text-xl">Tambah Kolam Baru</DialogTitle>
-                  <DialogDescription>Masukkan detail data kolam. Klik simpan jika sudah selesai.</DialogDescription>
-                </DialogHeader>
-                <form onSubmit={handleSubmit(onSubmitNewPond)} className="space-y-4 mt-2">
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Nama Kolam</label>
-                    <input {...register("name")} className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-md focus:outline-cyan-500" placeholder="Contoh: Kolam Blok A" />
-                    {errors.name && <p className="text-red-500 text-xs mt-1">{errors.name.message}</p>}
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Jenis Ikan</label>
-                    <input {...register("fishtype")} className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-md focus:outline-cyan-500" placeholder="Contoh: Nila" />
-                    {errors.fishtype && <p className="text-red-500 text-xs mt-1">{errors.fishtype.message}</p>}
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Kapasitas (Ekor)</label>
-                    <input type="number" {...register("capacity")} className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-md focus:outline-cyan-500" placeholder="Contoh: 1000" />
-                    {errors.capacity && <p className="text-red-500 text-xs mt-1">{errors.capacity.message}</p>}
-                  </div>
-                  <button type="submit" disabled={isAddingPond} className="w-full mt-4 bg-cyan-600 hover:bg-cyan-700 text-white font-medium py-2 rounded-md transition-colors disabled:opacity-50">
-                    {isAddingPond ? "Menyimpan..." : "Simpan Data Kolam"}
-                  </button>
-                </form>
-              </DialogContent>
-            </Dialog>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 2xl:grid-cols-4 gap-4">
@@ -483,24 +379,41 @@ export default function Dashboard() {
           <div className="lg:col-span-2 bg-white rounded-xl p-6 shadow-sm h-[430px] flex flex-col">
             <h3 className="text-xl font-bold text-cyan-700 mb-4 text-center">Grafik Fluktuasi Air</h3>
             <div className="flex-1">
-              {dashboardChartData.length > 0 ? (
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={dashboardChartData} margin={{ top: 5, right: 30, left: 0, bottom: 5 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                    <XAxis dataKey="time" stroke="#64748b" />
-                    <YAxis yAxisId="left" orientation="left" stroke="#67b3e8" domain={[0, 14]} ticks={[0, 2, 4, 6, 8, 10, 12, 14]} label={{ value: "pH", angle: -90, position: "insideLeft", fill: "#67b3e8", fontSize: 12 }} />
-                    <YAxis yAxisId="right" orientation="right" stroke="#f5a962" domain={kekeruhanDomain} label={{ value: "Kekeruhan (%)", angle: 90, position: "insideRight", fill: "#f5a962", fontSize: 12 }} />
-                    <Tooltip contentStyle={{ backgroundColor: "white", border: "1px solid #e2e8f0", borderRadius: "8px" }} formatter={(value: number, name: string) => { if (name === "Tingkat pH") return [value, "pH"]; return [`${value}%`, "Kekeruhan"]; }} />
-                    <Legend />
-                    <Bar yAxisId="left" dataKey="pH" name="Tingkat pH" fill="#67b3e8" radius={[4, 4, 0, 0]} />
-                    <Bar yAxisId="right" dataKey="kekeruhan" name="Kekeruhan (%)" fill="#f5a962" radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="flex h-full items-center justify-center rounded-lg border-2 border-dashed border-slate-200 text-sm text-slate-400">
-                  Data fluktuasi air masih kosong.
-                </div>
-              )}
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={dashboardChartData} margin={{ top: 5, right: 30, left: 0, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                  <XAxis dataKey="time" stroke="#64748b" />
+                  <YAxis
+                    yAxisId="left"
+                    orientation="left"
+                    stroke="#67b3e8"
+                    domain={[0, 14]}
+                    ticks={[0, 2, 4, 6, 8, 10, 12, 14]}
+                    label={{ value: "pH", angle: -90, position: "insideLeft", fill: "#67b3e8", fontSize: 12 }}
+                  />
+                  <YAxis
+                    yAxisId="right"
+                    orientation="right"
+                    stroke="#f5a962"
+                    domain={kekeruhanDomain}
+                    label={{ value: "Kekeruhan (%)", angle: 90, position: "insideRight", fill: "#f5a962", fontSize: 12 }}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: "white",
+                      border: "1px solid #e2e8f0",
+                      borderRadius: "8px",
+                    }}
+                    formatter={(value: number, name: string) => {
+                      if (name === "Tingkat pH") return [value, "pH"]
+                      return [`${value}%`, "Kekeruhan"]
+                    }}
+                  />
+                  <Legend />
+                  <Bar yAxisId="left" dataKey="pH" name="Tingkat pH" fill="#67b3e8" radius={[4, 4, 0, 0]} />
+                  <Bar yAxisId="right" dataKey="kekeruhan" name="Kekeruhan (%)" fill="#f5a962" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
             </div>
           </div>
 

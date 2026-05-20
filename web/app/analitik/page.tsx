@@ -54,9 +54,9 @@ export default function Analitik() {
         const API_BASE = "https://backend-aqua-chain.vercel.app";
         
         const [telemetryRes, fhiRes, alertsRes] = await Promise.all([
-          fetch(`${API_BASE}/api/telemetry/1?limit=100`),
-          fetch(`${API_BASE}/api/telemetry/fhiHistory/1`),
-          fetch(`${API_BASE}/api/telemetry/alertsHistory/1`)
+          fetch(`${API_BASE}/api/telemetry/pond-001?limit=100`),
+          fetch(`${API_BASE}/api/telemetry/fhiHistory/pond-001`),
+          fetch(`${API_BASE}/api/telemetry/alertsHistory/pond-001`)
         ]);
 
         if (telemetryRes.ok) {
@@ -261,26 +261,26 @@ export default function Analitik() {
             <h3 className="text-xl font-bold text-slate-800 mb-6 text-center">
               Kondisi Filter Terakhir
             </h3>
-            {fhiHistoryData.length > 0 ? (
-              <ResponsiveContainer width="100%" height={280}>
-                <BarChart data={fhiHistoryData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                  <XAxis dataKey="date" stroke="#64748b" fontSize={10} interval={0} angle={-45} textAnchor="end" height={60} />
-                  <YAxis stroke="#64748b" fontSize={12} domain={[0, 100]} ticks={[0, 20, 40, 60, 80, 100]} />
-                  <Tooltip contentStyle={{ backgroundColor: "white", border: "1px solid #e2e8f0", borderRadius: "8px" }} formatter={(value: number) => [`${value}%`, "FHI"]} />
-                  <Legend formatter={() => <span className="text-slate-600 font-medium">Skor FHI (%)</span>} iconType="circle" />
-                  <Bar dataKey="fhi" radius={[4, 4, 0, 0]}>
-                    {fhiHistoryData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={getFhiBarColor(entry.status)} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="flex h-[280px] items-center justify-center rounded-lg border-2 border-dashed border-slate-200 text-sm text-slate-400">
-                Data history FHI masih kosong.
-              </div>
-            )}
+            <ResponsiveContainer width="100%" height={280}>
+              <BarChart data={fhiHistoryData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                <XAxis dataKey="date" stroke="#64748b" fontSize={10} interval={0} angle={-45} textAnchor="end" height={60} />
+                <YAxis stroke="#64748b" fontSize={12} domain={[0, 100]} ticks={[0, 20, 40, 60, 80, 100]} />
+                <Tooltip
+                  contentStyle={{ backgroundColor: "white", border: "1px solid #e2e8f0", borderRadius: "8px" }}
+                  formatter={(value: number) => [`${value}%`, "FHI"]}
+                />
+                <Legend 
+                  formatter={() => <span className="text-slate-600 font-medium">Skor FHI (%)</span>} 
+                  iconType="circle" 
+                />
+                <Bar dataKey="fhi" radius={[4, 4, 0, 0]}>
+                  {fhiHistoryData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={getFhiBarColor(entry.status)} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
           </div>
 
           {/* Peringatan Dini Table */}
